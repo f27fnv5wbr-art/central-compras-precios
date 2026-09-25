@@ -15,7 +15,7 @@ Abrir http://localhost:3000. Sin variables de entorno funciona en modo local y g
 
 1. Crear un proyecto Supabase y ejecutar `supabase/schema.sql` en SQL Editor. Activar la autenticación por email según la política deseada.
 2. Copiar `.env.example` a `.env.local` y poner la URL del proyecto y la clave **publishable** (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`). Nunca usar una clave secreta en variables `NEXT_PUBLIC_`.
-3. Subir este proyecto a GitHub y conectar el repositorio en Vercel. Configurar las dos variables anteriores en Vercel y desplegar.
+3. Subir este proyecto a GitHub y conectar el repositorio en Vercel. Configurar `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` como **Config** para Production y Preview en Vercel y desplegar. Son valores públicos utilizados por el navegador; el prefijo `NEXT_PUBLIC_` requiere que Vercel permita su exposición.
 4. En el entorno conectado, iniciar sesión o crear usuario. Las políticas RLS limitan cada espacio de trabajo a su titular.
 
 La V1 guarda los datos del espacio de trabajo en un documento JSON de Supabase. Así conserva proveedores, versiones de tarifas, artículos y equivalencias con controles de acceso. Antes de acceso multiusuario concurrente o grandes volúmenes conviene migrar a tablas relacionales y añadir control de versiones.

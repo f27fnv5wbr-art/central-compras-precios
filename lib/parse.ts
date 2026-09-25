@@ -1,10 +1,37 @@
 import type {Unit} from './model';
 export type Draft={code:string;name:string;price:number;unit:Unit;sourceRow:number|null;packNote:string};
+export type MasterDraft={name:string;unit:Unit};
 const price=(v:unknown)=>{if(typeof v==='number')return v;let s=String(v??'').trim().replace(/[€\s]/g,'');if(s.includes(',')&&s.includes('.'))s=s.replace(/\./g,'').replace(',','.');else s=s.replace(',','.');return Number(s)};
 const unit=(v:unknown):Unit=>/\b(kg|kilo|uk)\b/i.test(String(v))?'kg':/\b(l|litro)\b/i.test(String(v))?'l':'ud';
+export async function parseMasterFile(file:File):Promise<MasterDraft[]>{
+ let names:MasterDraft[]=[];
+ if(/\.pdf$/i.test(file.name)){
+  const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc=new URL('pdfjs-dist/legacy/build/pdf.worker.mjs',import.meta.url).toString();
+  const doc=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  for(let page=1;page<=doc.numPages;page++){
+   const reader=(await doc.getPage(page)).streamTextContent().getReader();
+   const rows=new Map<number,{x:number;text:string}[]>();
+   try{while(true){const {value,done}=await reader.read();if(done)break;for(const it of value.items){if(!('str'in it)||!it.str.trim())continue;const y=Math.round(it.transform[5]*2)/2;const row=rows.get(y)||[];row.push({x:it.transform[4],text:it.str});rows.set(y,row)}}}finally{reader.releaseLock()}
+   for(const row of rows.values()){const value=row.sort((a,b)=>a.x-b.x).map(x=>x.text).join(' ').trim().replace(/^(?:[•\-–]|\d+[.)])\s*/,'').trim();if(value&&!/^(art[ií]culos?|producto|descripci[oó]n|unidad|lista de compra)$/i.test(value)&&!/^\d+(?:[,.]\d+)?$/.test(value))names.push({name:value,unit:'kg'})}
+  }
+ }else{
+  const XLSX=await import('xlsx');const wb=/\.csv$/i.test(file.name)?XLSX.read(await file.text(),{type:'string'}):XLSX.read(await file.arrayBuffer(),{type:'array'});
+  for(const sheetName of wb.SheetNames){const rows=XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName],{header:1,defval:''});
+   const header=rows.findIndex(r=>r.some(c=>/^(art[ií]culo|producto|descripci[oó]n|nombre)$/i.test(String(c).trim())));
+   const headings=header>=0?rows[header].map(x=>String(x).trim().toLowerCase()):[];
+   const nameIndex=header>=0?headings.findIndex(x=>/^(art[ií]culo|producto|descripci[oó]n|nombre)$/.test(x)):0;
+   const unitIndex=headings.findIndex(x=>/^(unidad|ud|u\.m\.|medida)$/.test(x));
+   for(const row of rows.slice(header+1)){const name=String(row[nameIndex]??'').trim();if(!name)continue;const rawUnit=unitIndex>=0?String(row[unitIndex]??'').trim():'';names.push({name,unit:rawUnit?unit(rawUnit):'kg'})}
+  }
+ }
+ const unique=new Map<string,MasterDraft>();for(const item of names){const name=item.name.replace(/\s+/g,' ').trim();if(name&&name.length<=180&&!/^(total|subtotal|fecha|p[aá]gina)\b/i.test(name))unique.set(name.toLocaleLowerCase('es')+'|'+item.unit,{name,unit:item.unit})}
+ if(!unique.size)throw Error('No se encontraron artículos. Usa una columna Artículo o Producto, o un PDF con texto seleccionable.');
+ return [...unique.values()];
+}
 export async function parseFile(file:File):Promise<Draft[]>{
  if(/\.pdf$/i.test(file.name))return parsePdf(file);
- const XLSX=await import('xlsx');const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});const rows:unknown[][]=[];
+ const XLSX=await import('xlsx');const wb=/\.csv$/i.test(file.name)?XLSX.read(await file.text(),{type:'string'}):XLSX.read(await file.arrayBuffer(),{type:'array'});const rows:unknown[][]=[];
  for(const sheet of wb.SheetNames)rows.push(...XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheet],{header:1,defval:''}));
  const header=rows.findIndex(r=>r.some(c=>/^(código|codigo|producto|artículo|articulo|descripción|descripcion)$/i.test(String(c).trim())));
  const h=header>=0?rows[header].map(x=>String(x).toLowerCase().trim()):[];

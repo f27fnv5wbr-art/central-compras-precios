@@ -24,13 +24,33 @@ async function parsePdf(file:File):Promise<Draft[]>{
  const pdfjs=await import('pdfjs-dist/legacy/build/pdf.mjs');
  pdfjs.GlobalWorkerOptions.workerSrc=new URL('pdfjs-dist/legacy/build/pdf.worker.mjs',import.meta.url).toString();
  const doc=await pdfjs.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
- const rows=new Map<string,{x:number;text:string}[]>();
- for(let page=1;page<=doc.numPages;page++){const content=await(await doc.getPage(page)).getTextContent();for(const it of content.items){if(!('str'in it)||!it.str.trim())continue;const key=`${page}:${Math.round(it.transform[5]*2)/2}`;const list=rows.get(key)||[];list.push({x:it.transform[4],text:it.str});rows.set(key,list)}}
+ const rows=new Map<string,{x:number;text:string}[]>();const singleColumnPages=new Set<number>();
+ for(let page=1;page<=doc.numPages;page++){
+  // Safari versions without ReadableStream async iteration throw in getTextContent().
+  // Consume the same stream through its reader, which also works in other browsers.
+  const reader=(await doc.getPage(page)).streamTextContent().getReader();
+  const items:{str:string;transform:number[]}[]=[];
+  try {while(true){const {value,done}=await reader.read();if(done)break;for(const it of value.items)if('str'in it)items.push(it)}}
+  finally {reader.releaseLock()}
+  if(items.some(it=>/DESCRIPCI[ÓO]N/i.test(it.str)))singleColumnPages.add(page);
+  for(const it of items){if(!it.str.trim())continue;const key=`${page}:${Math.round(it.transform[5]*2)/2}`;const list=rows.get(key)||[];list.push({x:it.transform[4],text:it.str});rows.set(key,list)}
+ }
  const found:Draft[]=[];
- for(const cells of rows.values()){cells.sort((a,b)=>a.x-b.x);const text=cells.map(x=>x.text).join(' ');
+ for(const [key,cells] of rows){cells.sort((a,b)=>a.x-b.x);const text=cells.map(x=>x.text).join(' ');
   const regex=/(?:^|\s)(\d{1,5})\s+(.+?)\s+(UK|UP)\s+(\d{1,4}[,.]\d{2,4})(?=\s|#|$)/gi;
   for(const m of text.matchAll(regex)){const p=price(m[4]);if(p>0)found.push({code:m[1],name:m[2].trim(),price:p,unit:m[3].toUpperCase()==='UK'?'kg':'ud',sourceRow:null,packNote:`Unidad original: ${m[3].toUpperCase()}`})}
+  // Chacón places codes, descriptions and prices in two side-by-side columns,
+  // plus a single-column alphabetical index on the final pages.
+  const page=Number(key.split(':')[0]);
+  const groups=singleColumnPages.has(page)?[cells]:[cells.filter(c=>c.x<300),cells.filter(c=>c.x>=300)];
+  for(const group of groups){const code=group.find(c=>/^\d{5}$/.test(c.text.trim()));if(!code)continue;
+   const amount=group.find(c=>c.x>code.x+150&&/^\d{1,4},\d{2,3}$/.test(c.text.trim()));if(!amount)continue;
+   const name=group.filter(c=>c.x>code.x&&c.x<amount.x).map(c=>c.text.trim()).filter(Boolean).join(' ').trim();
+   const p=price(amount.text);if(!name||!Number.isFinite(p)||p<=0)continue;
+   found.push({code:code.text.trim(),name,price:p,unit:'ud',sourceRow:null,packNote:'Chacón: la tarifa no indica unidad de venta; revisa kg/ud antes de comparar.'});
+  }
  }
- if(!found.length)throw Error('No se reconocieron líneas de precio en este PDF. Exporta la tarifa a Excel o CSV con columnas Producto y Precio.');
- return found;
+ const unique=new Map<string,Draft>();for(const row of found)unique.set(`${row.code}|${row.name}|${row.price}`,row);
+ if(!unique.size)throw Error('No se reconocieron líneas de precio en este PDF. Exporta la tarifa a Excel o CSV con columnas Producto y Precio.');
+ return [...unique.values()];
 }

@@ -47,7 +47,7 @@ async function parsePdf(file:File):Promise<Draft[]>{
    const amount=group.find(c=>c.x>code.x+150&&/^\d{1,4},\d{2,3}$/.test(c.text.trim()));if(!amount)continue;
    const name=group.filter(c=>c.x>code.x&&c.x<amount.x).map(c=>c.text.trim()).filter(Boolean).join(' ').trim();
    const p=price(amount.text);if(!name||!Number.isFinite(p)||p<=0)continue;
-   found.push({code:code.text.trim(),name,price:p,unit:'ud',sourceRow:null,packNote:'Chacón: la tarifa no indica unidad de venta; revisa kg/ud antes de comparar.'});
+   found.push({code:code.text.trim(),name,price:p,unit:'kg',sourceRow:null,packNote:'Chacón: kg predeterminado; revisa los artículos vendidos por unidad antes de comparar.'});
   }
  }
  const unique=new Map<string,Draft>();for(const row of found)unique.set(`${row.code}|${row.name}|${row.price}`,row);
